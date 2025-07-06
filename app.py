@@ -1,6 +1,19 @@
-from flask import Flask
-app = Flask(__name__)
+from fastapi import FastAPI
+from mangum import Mangum
 
-@app.route('/')
-def hello_world():
-    return 'hameed akshal'
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the root!"}
+
+@app.get("/hello/{name}")
+def hello_name(name: str):
+    return {"message": f"Hello, {name}!"}
+
+@app.post("/items/")
+def create_item(item: dict):
+    return {"received_item": item}
+
+# Lambda handler
+handler = Mangum(app)
