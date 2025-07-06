@@ -34,17 +34,20 @@ jobs:
       - name: 🧰 Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'  # or whatever version your lambda uses
+          python-version: '3.13'  # or whatever version your lambda uses
 
       - name: 📦 Install Python dependencies 📦 Prepare Lambda ZIP (excluding GitHub workflow files)
         run: |
+          rm -f lambda_package.zip
           python -m pip install --upgrade pip
-          pip install -r requirements.txt -t package/
-
-      - name: 📦 Prepare Lambda ZIP (excluding GitHub workflow files)
-        run: |
+          # pip install -r requirements.txt -t package/
           pip install -r requirements.txt -t .
           zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "*__pycache__/*"
+
+      # - name: 📦 Prepare Lambda ZIP (excluding GitHub workflow files)
+      #   run: |
+      #     pip install -r requirements.txt -t .
+      #     zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "*__pycache__/*"
           # mkdir -p build
           # cp -r package/* build/
           # cp -r *.py build/
@@ -52,14 +55,14 @@ jobs:
 
       - name: ☁️ Upload Lambda ZIP to S3
         run: |
-          aws s3 cp lambda_package.zip s3://${{ secrets.LAMBDA_S3_BUCKET }}/lambda_package.zip
+          aws s3 cp lambda_package.zip s3://${{ secrets.LAMBDA_S3_BUCKET }}/lambdatest121/lambda_package.zip
 
       - name: 🛠️ Update Lambda function code
         run: |
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
             --s3-bucket ${{ secrets.LAMBDA_S3_BUCKET }} \
-            --s3-key lambda_package.zip \
+            --s3-key lambdatest121/lambda_package.zip \
             --region ${{ secrets.AWS_REGION }}
 
       # - name: Setup Terraform
