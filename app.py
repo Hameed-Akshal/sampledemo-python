@@ -15,5 +15,9 @@ def hello_name(name: str):
 def create_item(item: dict):
     return {"received_item": item}
 
+@app.post("/products/")
+def create_product(product: dict):
+    return {"received_item": products}
+
 # Lambda handler
 handler = Mangum(app)
