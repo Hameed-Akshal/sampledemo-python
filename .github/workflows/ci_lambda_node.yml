@@ -51,7 +51,7 @@ jobs:
       - name: 📦 Install Node.js dependencies and Prepare Lambda ZIP
         run: |
           rm -f lambda_package.zip
-          npm ci  # or `npm install` if you don’t use package-lock.json
+          npm install
           zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "node_modules/aws-sdk/*" "lambda_package.zip"
 
       - name: ☁️ Upload Lambda ZIP to S3
