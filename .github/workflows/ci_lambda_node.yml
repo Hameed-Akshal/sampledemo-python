@@ -1,0 +1,67 @@
+name: "git action - s3 - lambda"
+on:
+  push:
+    # paths:
+    #   - 'terraform/**'
+    branches:
+      - node_lambda
+  # pull_request:
+permissions:
+      id-token: write # This is required for aws oidc connection
+      contents: read # This is required for actions/checkout
+env:
+  TF_LOG: INFO
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    steps:
+      - name: Git checkout
+        uses: actions/checkout@v4.1.7
+
+      - name: Configure AWS credentials from AWS account
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEV_GITHUB_ACTION_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          # role-session-name: GitHub-OIDC-TERRAFORM
+
+      # - name: 🧰 Set up Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: '3.13'  # or whatever version your lambda uses
+
+      # - name: 📦 Install Python dependencies 📦 Prepare Lambda ZIP (excluding GitHub workflow files)
+      #   run: |
+      #     rm -f lambda_package.zip
+      #     python -m pip install --upgrade pip
+      #     # pip install -r requirements.txt -t package/
+      #     pip install -r requirements.txt -t .
+      #     zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "*__pycache__/*"
+
+      - name: 🧰 Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'  # Use the version your Lambda uses
+      
+      - name: 📦 Install Node.js dependencies and Prepare Lambda ZIP
+        run: |
+          rm -f lambda_package.zip
+          npm ci  # or `npm install` if you don’t use package-lock.json
+          zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "node_modules/aws-sdk/*" "lambda_package.zip"
+
+      - name: ☁️ Upload Lambda ZIP to S3
+        run: |
+          aws s3 cp lambda_package.zip s3://${{ secrets.LAMBDA_S3_BUCKET }}/lambdatestnode/lambda_package.zip
+
+      - name: 🛠️ Update Lambda function code
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ secrets.LAMBDA_FUNCTION_NODE_NAME }} \
+            --s3-bucket ${{ secrets.LAMBDA_S3_BUCKET }} \
+            --s3-key lambdatestnode/lambda_package.zip \
+            --region ${{ secrets.AWS_REGION }}
