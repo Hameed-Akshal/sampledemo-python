@@ -9,7 +9,7 @@ def read_root():
 
 @app.get("/hello/{name}")
 def hello_name(name: str):
-    return {"message": f"Hello, {name}!"}
+    return {"message": f"Hello, {name}! here is the man from rock "}
 
 @app.post("/items/")
 def create_item(item: dict):

@@ -4,16 +4,20 @@ on:
     # paths:
     #   - 'terraform/**'
     branches:
-      - main
-  # pull_request:
+      - pythondev  # Trigger for dev deployments
+  pull_request:
+    branches:
+      - pythonstage  # Trigger stage deployment on PR to stage
+      - pythonprod   # Trigger prod deployment on PR to prod from stage
+    types: [closed]  # Only trigger after PR is merged
 permissions:
       id-token: write # This is required for aws oidc connection
       contents: read # This is required for actions/checkout
 env:
-  TF_LOG: INFO
   AWS_REGION: ${{ secrets.AWS_REGION }}
 jobs:
   deploy:
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -43,14 +47,40 @@ jobs:
           pip install -r requirements.txt -t .
           zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "*__pycache__/*"
 
+      - name: ☁️ Determine Environment and Lambda Function
+        id: set-vars
+        run: |
+          BRANCH_NAME="${GITHUB_REF##*/}"
+
+          # Handle push to pythondev
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$BRANCH_NAME" == "pythondev" ]]; then
+            echo "env_path=pythondev" >> $GITHUB_OUTPUT
+            echo "lambda_name=${{ secrets.LAMBDA_FUNCTION_NAME_DEV }}" >> $GITHUB_OUTPUT
+
+          # Handle merged PR to pythonstage
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$BRANCH_NAME" == "pythonstage" ]]; then
+            echo "env_path=pythonstage" >> $GITHUB_OUTPUT
+            echo "lambda_name=${{ secrets.LAMBDA_FUNCTION_NAME_STAGE }}" >> $GITHUB_OUTPUT
+
+          # Handle merged PR to pythonprod (only if from pythonstage)
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$BRANCH_NAME" == "pythonprod" && "${{ github.event.pull_request.head.ref }}" == "pythonstage" ]]; then
+            echo "env_path=pythonprod" >> $GITHUB_OUTPUT
+            echo "lambda_name=${{ secrets.LAMBDA_FUNCTION_NAME_PROD }}" >> $GITHUB_OUTPUT
+
+          else
+            echo "❌ Unsupported branch or condition"
+            exit 1
+          fi
+
       - name: ☁️ Upload Lambda ZIP to S3
         run: |
-          aws s3 cp lambda_package.zip s3://${{ secrets.LAMBDA_S3_BUCKET }}/lambdatest121/lambda_package.zip
+          BRANCH_NAME=${GITHUB_REF_NAME}
+          aws s3 cp lambda_package.zip s3://${{ secrets.LAMBDA_S3_BUCKET }}/lambdatest121/${{ steps.set-vars.outputs.env_path }}/lambda_package.zip
 
       - name: 🛠️ Update Lambda function code
         run: |
           aws lambda update-function-code \
-            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
+            --function-name ${{ steps.set-vars.outputs.lambda_name }} \
             --s3-bucket ${{ secrets.LAMBDA_S3_BUCKET }} \
-            --s3-key lambdatest121/lambda_package.zip \
+            --s3-key lambdatest121/${{ steps.set-vars.outputs.env_path }}/lambda_package.zip \
             --region ${{ secrets.AWS_REGION }}
