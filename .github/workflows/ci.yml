@@ -82,5 +82,5 @@ jobs:
           aws lambda update-function-code \
             --function-name ${{ steps.set-vars.outputs.lambda_name }} \
             --s3-bucket ${{ secrets.LAMBDA_S3_BUCKET }} \
-            --s3-key lambdatest121/lambda_package.zip \
+            --s3-key lambdatest121/${{ steps.set-vars.outputs.env_path }}/lambda_package.zip \
             --region ${{ secrets.AWS_REGION }}
