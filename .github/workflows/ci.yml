@@ -1,19 +1,22 @@
-name: "git action - s3 - lambda"
+name: "git action - ecr - ecs"
 on:
   push:
-    # paths:
-    #   - 'terraform/**'
     branches:
-      - main
-  # pull_request:
+      - python_docker_dev  # Trigger for dev deployments
+  pull_request:
+    branches:
+      - pythonstage  # Trigger stage deployment on PR to stage
+      - pythonprod   # Trigger prod deployment on PR to prod from stage
+    types: [closed]  # Only trigger after PR is merged
 permissions:
       id-token: write # This is required for aws oidc connection
       contents: read # This is required for actions/checkout
 env:
-  TF_LOG: INFO
   AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPO: ${{ secrets.ECR_REPO }}
 jobs:
   deploy:
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -28,29 +31,17 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEV_GITHUB_ACTION_ROLE }}
           aws-region: ${{ secrets.AWS_REGION }}
-          # role-session-name: GitHub-OIDC-TERRAFORM
 
-      - name: 🧰 Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'  # or whatever version your lambda uses
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: 📦 Install Python dependencies 📦 Prepare Lambda ZIP (excluding GitHub workflow files)
+      - name: Build, tag, and push Docker image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          rm -f lambda_package.zip
-          python -m pip install --upgrade pip
-          # pip install -r requirements.txt -t package/
-          pip install -r requirements.txt -t .
-          zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "*__pycache__/*"
-
-      - name: ☁️ Upload Lambda ZIP to S3
-        run: |
-          aws s3 cp lambda_package.zip s3://${{ secrets.LAMBDA_S3_BUCKET }}/lambdatest121/lambda_package.zip
-
-      - name: 🛠️ Update Lambda function code
-        run: |
-          aws lambda update-function-code \
-            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
-            --s3-bucket ${{ secrets.LAMBDA_S3_BUCKET }} \
-            --s3-key lambdatest121/lambda_package.zip \
-            --region ${{ secrets.AWS_REGION }}
+          docker build -t $ECR_REGISTRY/${{ secrets.ECR_REPO }}:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/${{ secrets.ECR_REPO }}:$IMAGE_TAG
+          echo "ECR_IMAGE=$ECR_REGISTRY/${{ secrets.ECR_REPO }}:$IMAGE_TAG" >> $GITHUB_ENV
+       
