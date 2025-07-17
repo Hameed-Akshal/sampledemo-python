@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from mangum import Mangum
+# from mangum import Mangum
 
 app = FastAPI()
 
@@ -20,4 +20,4 @@ def create_product(product: dict):
     return {"received_item": products}
 
 # Lambda handler
-handler = Mangum(app)
+# handler = Mangum(app)
