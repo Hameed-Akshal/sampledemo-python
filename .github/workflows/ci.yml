@@ -88,6 +88,8 @@ jobs:
       - name: 📦 Get current ECS task definition
         id: get-task-def
         run: |
+          echo "Cluster: ${{ steps.set-vars.outputs.ecs_cluster }}"
+          echo "Service: ${{ steps.set-vars.outputs.ecs_service }}"
           TASK_DEF_ARN=$(aws ecs describe-services \
             --cluster ${{ steps.set-vars.outputs.ecs_cluster }} \
             --services ${{ steps.set-vars.outputs.ecs_service }} \
