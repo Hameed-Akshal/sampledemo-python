@@ -93,6 +93,12 @@ jobs:
             --services ${{ steps.set-vars.outputs.ecs_service }} \
             --query "services[0].taskDefinition" \
             --output text)
+
+          if [[ -z "$TASK_DEF_ARN" || "$TASK_DEF_ARN" == "None" ]]; then
+            echo "❌ Failed to fetch ECS task definition ARN"
+            exit 1
+          fi
+          echo "Fetched task def ARN: $TASK_DEF_ARN"
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
           echo "task_def_arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
 
