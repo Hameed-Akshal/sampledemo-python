@@ -13,7 +13,7 @@ permissions:
       contents: read # This is required for actions/checkout
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPO: ${{ secrets.ECR_REPO }}
+  # ECR_REPO: ${{ secrets.ECR_REPO }}
 jobs:
   deploy:
     if: github.event_name == 'push' || github.event.pull_request.merged == true
@@ -26,10 +26,47 @@ jobs:
       - name: Git checkout
         uses: actions/checkout@v4.1.7
 
+      - name: ☁️ Determine Environment and ECS Variables
+        id: set-vars
+        run: |
+          BRANCH_NAME="${GITHUB_REF##*/}"
+
+          # Push to pythondev
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$BRANCH_NAME" == "pythondev" ]]; then
+            echo "env_path=pythondev" >> $GITHUB_OUTPUT
+            echo "ecr_repo=${{ secrets.ECR_REPO }}" >> $GITHUB_OUTPUT
+            echo "ecs_cluster=${{ secrets.ECS_CLUSTER_DEV }}" >> $GITHUB_OUTPUT
+            echo "ecs_service=${{ secrets.ECS_SERVICE_DEV }}" >> $GITHUB_OUTPUT
+            echo "container_name=${{ secrets.CONTAINER_NAME_DEV }}" >> $GITHUB_OUTPUT
+            echo "role_arn=${{ secrets.AWS_DEV_GITHUB_ACTION_ROLE }}" >> $GITHUB_OUTPUT
+
+          # PR merged to pythonstage
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$BRANCH_NAME" == "pythonstage" ]]; then
+            echo "env_path=pythonstage" >> $GITHUB_OUTPUT
+            echo "ecr_repo=${{ secrets.ECR_REPO_STAGE }}" >> $GITHUB_OUTPUT
+            echo "ecs_cluster=${{ secrets.ECS_CLUSTER_STAGE }}" >> $GITHUB_OUTPUT
+            echo "ecs_service=${{ secrets.ECS_SERVICE_STAGE }}" >> $GITHUB_OUTPUT
+            echo "container_name=${{ secrets.CONTAINER_NAME_STAGE }}" >> $GITHUB_OUTPUT
+            echo "role_arn=${{ secrets.AWS_DEV_GITHUB_ACTION_ROLE }}" >> $GITHUB_OUTPUT
+
+          # PR merged to pythonprod (from pythonstage)
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$BRANCH_NAME" == "pythonprod" && "${{ github.event.pull_request.head.ref }}" == "pythonstage" ]]; then
+            echo "env_path=pythonprod" >> $GITHUB_OUTPUT
+            echo "ecr_repo=${{ secrets.ECR_REPO_PROD }}" >> $GITHUB_OUTPUT
+            echo "ecs_cluster=${{ secrets.ECS_CLUSTER_PROD }}" >> $GITHUB_OUTPUT
+            echo "ecs_service=${{ secrets.ECS_SERVICE_PROD }}" >> $GITHUB_OUTPUT
+            echo "container_name=${{ secrets.CONTAINER_NAME_PROD }}" >> $GITHUB_OUTPUT
+            echo "role_arn=${{ secrets.AWS_DEV_GITHUB_ACTION_ROLE }}" >> $GITHUB_OUTPUT
+
+          else
+            echo "❌ Unsupported branch or condition"
+            exit 1
+          fi
+
       - name: Configure AWS credentials from AWS account
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_DEV_GITHUB_ACTION_ROLE }}
+          role-to-assume: ${{ steps.set-vars.outputs.role_ar }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -40,8 +77,60 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
+          ECR_REPO: ${{ steps.set-vars.outputs.ecr_repo }}
         run: |
-          docker build -t $ECR_REGISTRY/${{ secrets.ECR_REPO }}:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/${{ secrets.ECR_REPO }}:$IMAGE_TAG
-          echo "ECR_IMAGE=$ECR_REGISTRY/${{ secrets.ECR_REPO }}:$IMAGE_TAG" >> $GITHUB_ENV
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG"
+          echo "Pushing image: $IMAGE_URI"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+
+      - name: 📦 Get current ECS task definition
+        id: get-task-def
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster ${{ steps.set-vars.outputs.ecs_cluster }} \
+            --services ${{ steps.set-vars.outputs.ecs_service }} \
+            --query "services[0].taskDefinition" \
+            --output text)
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
+          echo "task_def_arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+
+      - name: 🛠 Register new ECS task definition revision
+        id: new-task-def
+        run: |
+          # Download current task def and replace image
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.TASK_DEF_ARN }} \
+            --query "taskDefinition" > task-def.json
+
+          # Replace container image
+          CONTAINER_NAME=${{ steps.set-vars.outputs.container_name }}
+          IMAGE_URI=${{ env.IMAGE_URI }}
+
+          jq --arg IMAGE "$IMAGE_URI" --arg NAME "$CONTAINER_NAME" '
+            .containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)
+            | del(.status, .revision, .taskDefinitionArn, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            task-def.json > new-task-def.json
+
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-task-def.json \
+            --query "taskDefinition.taskDefinitionArn" \
+            --output text)
+
+          echo "NEW_TASK_DEF_ARN=$NEW_TASK_DEF_ARN" >> $GITHUB_ENV
+
+      - name: 🚀 Update ECS Service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ steps.set-vars.outputs.ecs_cluster }} \
+            --service ${{ steps.set-vars.outputs.ecs_service }} \
+            --task-definition ${{ env.NEW_TASK_DEF_ARN }} \
+            --force-new-deployment
+
+      - name: ✅ Confirm Deployment is Stable
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ steps.set-vars.outputs.ecs_cluster }} \
+            --services ${{ steps.set-vars.outputs.ecs_service }}
        
