@@ -32,7 +32,7 @@ jobs:
           BRANCH_NAME="${GITHUB_REF##*/}"
 
           # Push to pythondev
-          if [[ "$GITHUB_EVENT_NAME" == "push" && "$BRANCH_NAME" == "pythondev" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$BRANCH_NAME" == "python_docker_dev" ]]; then
             echo "env_path=pythondev" >> $GITHUB_OUTPUT
             echo "ecr_repo=${{ secrets.ECR_REPO }}" >> $GITHUB_OUTPUT
             echo "ecs_cluster=${{ secrets.ECS_CLUSTER_DEV }}" >> $GITHUB_OUTPUT
