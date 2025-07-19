@@ -1,19 +1,21 @@
-name: "git action - s3 - lambda"
+name: "git action - s3 - cloudfront"
 on:
   push:
-    # paths:
-    #   - 'terraform/**'
     branches:
-      - main
-  # pull_request:
+      - s3_cloudfront
+  pull_request:
+    branches:
+      - pythonstage  # Trigger stage deployment on PR to stage
+      - pythonprod   # Trigger prod deployment on PR to prod from stage
+    types: [closed]  # Only trigger after PR is merged
 permissions:
       id-token: write # This is required for aws oidc connection
       contents: read # This is required for actions/checkout
 env:
-  TF_LOG: INFO
   AWS_REGION: ${{ secrets.AWS_REGION }}
 jobs:
   deploy:
+    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -30,27 +32,24 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
           # role-session-name: GitHub-OIDC-TERRAFORM
 
-      - name: 🧰 Set up Python
-        uses: actions/setup-python@v5
+      - name: 🧰 Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.13'  # or whatever version your lambda uses
+          node-version: '22'  # Use the version your Lambda uses
 
-      - name: 📦 Install Python dependencies 📦 Prepare Lambda ZIP (excluding GitHub workflow files)
-        run: |
-          rm -f lambda_package.zip
-          python -m pip install --upgrade pip
-          # pip install -r requirements.txt -t package/
-          pip install -r requirements.txt -t .
-          zip -r lambda_package.zip . -x ".git/*" ".github/*" "*.zip" "*__pycache__/*"
+      - name: 📦 Install dependencies
+        run: npm install --legacy-peer-deps
 
-      - name: ☁️ Upload Lambda ZIP to S3
-        run: |
-          aws s3 cp lambda_package.zip s3://${{ secrets.LAMBDA_S3_BUCKET }}/lambdatest121/lambda_package.zip
+      - name: 🛠 Build React App
+        run: npm run build
 
-      - name: 🛠️ Update Lambda function code
+      - name: ☁️ Upload  to S3
         run: |
-          aws lambda update-function-code \
-            --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
-            --s3-bucket ${{ secrets.LAMBDA_S3_BUCKET }} \
-            --s3-key lambdatest121/lambda_package.zip \
-            --region ${{ secrets.AWS_REGION }}
+          aws s3 cp lambda_package.zip s3:///lambdatest121/lambda_package.zip
+          aws s3 sync build/ s3://${{ secrets.LAMBDA_S3_BUCKET }}/s3-cloudfront/ --delete
+
+      - name: 🌐 Invalidate CloudFront Cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID }} \
+            --paths "/*"
