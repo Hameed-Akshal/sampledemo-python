@@ -45,7 +45,6 @@ jobs:
 
       - name: ☁️ Upload  to S3
         run: |
-          aws s3 cp lambda_package.zip s3:///lambdatest121/lambda_package.zip
           aws s3 sync build/ s3://${{ secrets.LAMBDA_S3_BUCKET }}/s3-cloudfront/ --delete
 
       - name: 🌐 Invalidate CloudFront Cache
